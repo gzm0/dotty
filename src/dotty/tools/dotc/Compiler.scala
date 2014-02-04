@@ -23,7 +23,7 @@ class Compiler {
       List(new LazyValsCreateCompanionObjects, new PatternMatcher),    //force separataion between lazyVals and LVCreateCO
       List(new LazyValTranformContext().transformer, new Splitter, new TypeTestsCasts),
       List(new Erasure),
-      List(new UncurryTreeTransform)
+      List(new UncurryTreeTransform, new Flatten())
     )
 
   var runId = 1

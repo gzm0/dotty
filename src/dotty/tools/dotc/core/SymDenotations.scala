@@ -423,6 +423,10 @@ object SymDenotations {
     final def isNullableClass(implicit ctx: Context): Boolean =
       isNonValueClass && !(this is ModuleClass) // todo: check that class does not derive from NotNull?
 
+    /** Is this symbol a class defined within another class? */
+    final def isNestedClass(implicit ctx: Context): Boolean =
+      isClass && !(this.owner is Package)
+
     /** Is this definition accessible as a member of tree with type `pre`?
      *  @param pre          The type of the tree from which the selection is made
      *  @param superAccess  Access is via super
