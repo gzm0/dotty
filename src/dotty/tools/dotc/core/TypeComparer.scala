@@ -890,9 +890,6 @@ class TypeComparer(initctx: Context) extends DotClass {
 
   /** Try to distribute `&` inside type, detect and handle conflicts */
   private def distributeAnd(tp1: Type, tp2: Type): Type = tp1 match {
-    // opportunistically merge same-named refinements
-    // this does not change anything semantically (i.e. merging or not merging
-    // gives =:= types), but it keeps the type smaller.
     case tp1: RefinedType =>
       // opportunistically merge same-named refinements
       // this does not change anything semantically (i.e. merging or not merging
