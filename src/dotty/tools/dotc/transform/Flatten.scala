@@ -3,35 +3,39 @@ package transform
 
 import scala.collection.mutable
 
-import core._
-import Phases._
-import Contexts._
-import Symbols._
-import parsing.Parsers.Parser
-import config.Printers._
-import Denotations._
+import TreeTransforms._
+import core.DenotTransformers._
+import core.Denotations._
+import core.Contexts._
+import core.Types._
+import ast.tpd._
 
-class Flatten extends Phase {
+class Flatten extends TreeTransform with DenotTransformer {
 
-  import ast.tpd
-  import ast.Trees._
-
-  // todo: core.Phases.PhasesBase also defines "flatten"
   def name = "flatten"
-
   override def description =
     """The flatten phase lifts nested classes to the package level"""
 
-  override def run(implicit ctx: Context): Unit = {
+  /** Intermediate store for class definitions that are about to be lifted
+    *
+    *  Use a map from package module symbols to the buffers containing
+    *  TypeDef trees that are going to be lifted. This is a map (rather than a
+    *  var) in order to handle nested packages correctly.
+    */
+  private val liftedDefs =
+    mutable.Map.empty[Symbol, mutable.ListBuffer[Tree]]
 
-    // todo: is this a sym or a ref transformer?
-    class FlattenSymTransformer extends ctx.base.symTransformers.Transformer {
-      // todo: is this correct? transform post flatten
-      val phaseId: Int = Flatten.this.next.id
+  override def prepareForPackageDef(tree: PackageDef) = {
+    // Create buffer for nested defs
+    val buf = new mutable.ListBuffer[Tree]
+    liftedDefs(tree.symbol.moduleClass) = buf
 
-      /** The transformation method */
-      def transform(ref: SingleDenotation)(implicit ctx: Context) = {
-        println(s"asked to transform $ref")
+          // Transform definitions. Nested classes will get lifted into buf
+          val stats1 = transformStats(stats0)
+  }
+
+  override def transformPackageDef()
+
 
         /*
          * This is stuff copied from 2.x
@@ -73,35 +77,12 @@ class Flatten extends Phase {
       case _ =>
         mapOver(tp)
     } */
-ref
-      }
 
-    }
-
-    // todo: phase id
-    val symTrans = new FlattenSymTransformer()
-    ctx.base.symTransformers.install(symTrans.phaseId, symTrans)
-
-    val flatter = new TreeFlattener
-    val oldTree = ctx.compilationUnit.tpdTree
-    val newTree = flatter.transform(oldTree)
-    println("Tree after flatten")
-    println(newTree.show)
-    ctx.compilationUnit.tpdTree = newTree
-
-  }
 
   /** TreeFlattener moves nested class definitions to the package level */
   class TreeFlattener extends tpd.TreeTransformer {
 
-    /** Intermediate store for class definitions that are about to be lifted
-     *
-     *  Use a map from package module symbols to the buffers containing
-     *  TypeDef trees that are going to be lifted. This is a map (rather than a
-     *  var) in order to handle nested packages correctly.
-     */
-    private val liftedDefs =
-      mutable.Map.empty[Symbol, mutable.ListBuffer[tpd.Tree]]
+
 
     override def transform(tree: tpd.Tree)(implicit ctx: Context) =
       postTransform(preTransform(tree))
@@ -109,12 +90,7 @@ ref
     private def preTransform(tree: tpd.Tree)(implicit ctx: Context) = {
       tree match {
         case PackageDef(pid, stats0) =>
-          // Create buffer for nested defs
-          val buf = new mutable.ListBuffer[tpd.Tree]
-          liftedDefs(tree.symbol.moduleClass) = buf
 
-          // Transform definitions. Nested classes will get lifted into buf
-          val stats1 = transformStats(stats0)
 
           cpy.PackageDef(tree, transformSub(pid), stats1 ++ buf)
         case TypeDef(_, name, _) if tree.symbol.isNestedClass =>
