@@ -35,10 +35,17 @@ class FlattenTest extends DottyTest {
       println(B.StaticObject)
     }
 
-    // Nexted packages
+    // Nested packages
     package hello {
       class Foo {
         class Bar
+      }
+    }
+
+    // Package object
+    package object foobar {
+      class PoA {
+        class PoB
       }
     }
     """

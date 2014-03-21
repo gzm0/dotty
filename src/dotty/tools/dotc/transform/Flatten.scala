@@ -3,7 +3,6 @@ package transform
 
 import scala.collection.mutable
 
-import TreeTransforms._
 import core.DenotTransformers._
 import core.Denotations._
 import core.Contexts._
@@ -11,6 +10,8 @@ import core.Types._
 import core.Symbols._
 import core.Flags._
 import ast.tpd._
+
+import TreeTransforms._
 
 class Flatten extends TreeTransform with DenotTransformer {
 
@@ -29,8 +30,7 @@ class Flatten extends TreeTransform with DenotTransformer {
 
   override def prepareForPackageDef(tree: PackageDef)(implicit ctx: Context) = {
     // Create buffer for nested defs
-    val buf = new mutable.ListBuffer[Tree]
-    liftedDefs(tree.symbol.moduleClass) = buf
+    liftedDefs(tree.symbol.moduleClass) = new mutable.ListBuffer[Tree]
     this
   }
 
@@ -38,23 +38,12 @@ class Flatten extends TreeTransform with DenotTransformer {
   override def transformPackageDef(tree: PackageDef)(
     implicit ctx: Context, info: TransformerInfo) = {
 
-    // By this point, nested classses are lifted in the corresponding
-    // buffer, but we still have to transform these trees. This can
-    // result in other lifted classes. We therefore iterate until we
-    // find a fixpoint.
-    val globBuf = liftedDefs(tree.symbol.moduleClass)
-    val locBuf  = new mutable.ListBuffer[Tree]
+    // Splice nested classes. Call transformFollowing to apply transforms of
+    // subsequent phases.
+    val innerStats = liftedDefs.remove(tree.symbol.moduleClass).get
+    val transStats = innerStats.map(transformFollowing _)
 
-    while (globBuf.nonEmpty) {
-      val curElems = globBuf.toList
-      globBuf.clear()
-      locBuf ++= transformStats(curElems)
-    }
-
-    // clear definition map for this package
-    liftedDefs.remove(tree.symbol.moduleClass)
-
-    cpy.PackageDef(tree, tree.pid, tree.stats ++ locBuf)
+    cpy.PackageDef(tree, tree.pid, tree.stats ++ transStats)
   }
 
   /** buffers nested classes for later splicing */
@@ -66,12 +55,14 @@ class Flatten extends TreeTransform with DenotTransformer {
     if (sym.isNestedClass) {
       // Append the tree to the buffer, but don't transform it. We
       // want it to appear in the proper position for later
-      // transforms. This also ensures that the following
+      // transforms.
+
+      // todo: Flatten in 2.x ensures the that the following
       //
       //   `object O { trait A { trait B } }`
       //
       // will be correctly ordered (lifted `B` should appear after
-      // lifted `A`).
+      // lifted `A`). We don't do that currently. Is it required?
       liftedDefs(sym.enclosingPackage).append(tree)
 
       EmptyTree
@@ -105,7 +96,6 @@ class Flatten extends TreeTransform with DenotTransformer {
   //
   // is this required? why?
 
-
   /** re-targets Select trees on static modules which we have lifted */
   override def transformSelect(tree: Select)(
     implicit ctx: Context, info: TransformerInfo) = {
@@ -124,7 +114,7 @@ class Flatten extends TreeTransform with DenotTransformer {
 
   // todo
   def transform(ref: SingleDenotation)(implicit ctx: Context) = ref
-
+/*
   class TypeFlattener(implicit ctx: Context) extends TypeMap {
     def apply(tp: Type): Type = tp match {
       case TypeRef(pre, sym, args) if isFlattenablePrefix(pre) =>
@@ -163,6 +153,6 @@ class Flatten extends TreeTransform with DenotTransformer {
       case _ =>
         mapOver(tp)
     }
-  }
+  }*/
 
 }
