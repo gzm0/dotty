@@ -5,13 +5,17 @@ import scala.collection.mutable
 
 import core.DenotTransformers._
 import core.Denotations._
+import core.SymDenotations._
 import core.Contexts._
 import core.Types._
 import core.Symbols._
+import core.Scopes._
 import core.Flags._
 import ast.tpd._
 
 import TreeTransforms._
+
+import config.Printers.{ flatten => debug }
 
 class Flatten extends TreeTransform with DenotTransformer {
 
@@ -113,48 +117,75 @@ class Flatten extends TreeTransform with DenotTransformer {
 
 
   // todo
-  def transform(ref: SingleDenotation)(implicit ctx: Context) = ref
+  def transform(ref: SingleDenotation)(implicit ctx: Context) = ctx.atPhase(this.id) { ctx0 =>
+    debug.println(s"flattening: $ref")
+
+    implicit val ctx: Context = ctx0
+
+    val flatten = new TypeFlattener
+    val info1 = flatten(ref.info)
+
+    ref match {
+      case sDet: SymDenotation =>
+        val isLifted = !sDet.isTopLevel && (
+            (sDet is Module) && !sDet.isStaticModule || sDet.isClass
+        )
+
+        val flags = if (isLifted) sDet.flags | Lifted else sDet.flags
+        sDet.copySymDenotation(info = info1, initFlags = flags)
+      case _ =>
+        ref.derivedSingleDenotation(ref.symbol, info1)
+    }
+  }
 
   class TypeFlattener(implicit ctx: Context) extends TypeMap {
     def apply(tp: Type): Type = tp match {
-      case TypeRef(prefix, name) if isFlattenablePrefix(pre) =>
-        assert(args.isEmpty && sym.enclosingTopLevelClass != NoSymbol, sym.ownerChain)
-        typeRef(sym.enclosingTopLevelClass.owner.thisType, sym, Nil)
-      case ClassInfoType(parents, decls, clazz) =>
-        var parents1 = parents
-        val decls1 = scopeTransform(clazz) {
-          val decls1 = newScope
-          if (clazz.isPackageClass) {
-            exitingFlatten { decls foreach (decls1 enter _) }
-          }
-          else {
-            val oldowner = clazz.owner
-            exitingFlatten { oldowner.info }
-            parents1 = parents mapConserve (this)
+      case tp: TypeRef if !(tp.symbol.owner is PackageClass) =>
+        debug.println(s"TypeRef $tp")
+
+        // todo: 2.x checks here, whether the outer class doesn't have type
+        // parameters so the lifted type doesn't reference them. But we are post
+        // erasure so there should be no parameter types anymore
+        // 2.x also doesn't handle type members
+        TypeRef(tp.symbol.enclosingPackage.thisType, tp.name)
+      case ClassInfo(prefix, cls, classParents, decls, selfInfo) =>
+        debug.println(s"ClassInfo $tp")
+
+        // Transform parent class info (nop for packages)
+        val parents1 = classParents.mapConserve(this)
+
+        // Transform declarations
+        val decls1 = scopeTransform(cls) {
+          val sc = newScope
+          if (cls is PackageClass) {
+            ctx.atNextPhase { ctx =>
+              decls foreach { sc.enter(_)(ctx) }
+            }
+          } else {
+            // todo: 2.x forces the info of the old owner here:
+            //
+            //   val oldowner = cls.owner
+            //   exitingFlatten { oldowner.info }
+            //
+            // do we need this?
 
             for (sym <- decls) {
-              if (sym.isTerm && !sym.isStaticModule) {
-                decls1 enter sym
-                if (sym.isModule)
-                  sym.moduleClass setFlag LIFTED
-              } else if (sym.isClass)
-                liftSymbol(sym)
+              if (sym.isTerm && !sym.isStaticModule || sym.isClass) {
+                ctx.atNextPhase { ctx => sc.enter(sym)(ctx) }
+              } else {
+                debug.println(s"Other sym in class: $sym")
+              }
             }
           }
-          decls1
+          sc
         }
-        ClassInfoType(parents1, decls1, clazz)
-      case MethodType(params, restp) =>
-        val restp1 = apply(restp)
-        if (restp1 eq restp) tp else copyMethodType(tp, params, restp1)
-      case PolyType(tparams, restp) =>
-        val restp1 = apply(restp)
-        if (restp1 eq restp) tp else PolyType(tparams, restp1)
+
+        debug.println(s"declarations $decls1")
+
+        ClassInfo(prefix, cls, classParents, decls1, selfInfo)
       case _ =>
         mapOver(tp)
     }
   }
-
-
 
 }
