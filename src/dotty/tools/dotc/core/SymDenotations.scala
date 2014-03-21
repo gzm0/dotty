@@ -430,6 +430,9 @@ object SymDenotations {
     final def isTopLevel(implicit ctx: Context): Boolean =
       this.owner is Package
 
+    final def isStaticModule(implicit ctx: Context): Boolean =
+      (this is Module) && (this.isTopLevel || this.owner.isStaticModule)
+
     /** Is this definition accessible as a member of tree with type `pre`?
      *  @param pre          The type of the tree from which the selection is made
      *  @param superAccess  Access is via super

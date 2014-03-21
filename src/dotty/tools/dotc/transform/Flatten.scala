@@ -9,6 +9,7 @@ import core.Denotations._
 import core.Contexts._
 import core.Types._
 import core.Symbols._
+import core.Flags._
 import ast.tpd._
 
 class Flatten extends TreeTransform with DenotTransformer {
@@ -33,11 +34,9 @@ class Flatten extends TreeTransform with DenotTransformer {
     this
   }
 
+  /** splices definitions back into parent package */
   override def transformPackageDef(tree: PackageDef)(
     implicit ctx: Context, info: TransformerInfo) = {
-
-    // todo: am I responsible for this??
-    //val stats1 = transformStats(tree.stats0)
 
     // By this point, nested classses are lifted in the corresponding
     // buffer, but we still have to transform these trees. This can
@@ -45,26 +44,26 @@ class Flatten extends TreeTransform with DenotTransformer {
     // find a fixpoint.
     val globBuf = liftedDefs(tree.symbol.moduleClass)
     val locBuf  = new mutable.ListBuffer[Tree]
-    
+
     while (globBuf.nonEmpty) {
       val curElems = globBuf.toList
       globBuf.clear()
       locBuf ++= transformStats(curElems)
     }
 
-    // todo: do I need to transform pid here?
+    // clear definition map for this package
+    liftedDefs.remove(tree.symbol.moduleClass)
+
     cpy.PackageDef(tree, tree.pid, tree.stats ++ locBuf)
   }
 
+  /** buffers nested classes for later splicing */
   override def transformTypeDef(tree: TypeDef)(
     implicit ctx: Context, info: TransformerInfo) = {
 
     val sym = tree.symbol
 
     if (sym.isNestedClass) {
-      // Buffer for these trees
-      val liftedBuffer = liftedDefs(sym.enclosingPackage)
-
       // Append the tree to the buffer, but don't transform it. We
       // want it to appear in the proper position for later
       // transforms. This also ensures that the following
@@ -72,11 +71,31 @@ class Flatten extends TreeTransform with DenotTransformer {
       //   `object O { trait A { trait B } }`
       //
       // will be correctly ordered (lifted `B` should appear after
-      // lifted `A`). 
-      liftedBuffer.append(tree)
+      // lifted `A`).
+      liftedDefs(sym.enclosingPackage).append(tree)
 
       EmptyTree
     } else tree
+  }
+
+  /** buffers nested static module vals for later splicing */
+  override def transformValDef(tree: ValDef)(
+    implicit ctx: Context, info: TransformerInfo) = {
+
+    val sym = tree.symbol
+
+    if (sym.isStaticModule && !sym.isTopLevel) {
+      // todo: this splices these module accessors "relatively" late.
+      // if we have:
+      //
+      //     `object A { object B }; object C { A.B }`
+      //
+      // B's accessor will be spliced after the definition of `C`. Is this an
+      // issue?
+      liftedDefs(sym.enclosingPackage).append(tree)
+      EmptyTree
+    } else tree
+
   }
 
   // todo: Scalac 2.x contains another match here:
@@ -87,21 +106,27 @@ class Flatten extends TreeTransform with DenotTransformer {
   // is this required? why?
 
 
+  /** re-targets Select trees on static modules which we have lifted */
   override def transformSelect(tree: Select)(
     implicit ctx: Context, info: TransformerInfo) = {
 
-    // todo
-    // case Select(qual, name) if sym.isStatic && sym.is(Flags.Module) && !sym.isTopLevel =>
-    tree
+    val sym = tree.symbol
+
+    // Check if this select targets a static module whose accessor we have
+    // lifted. If this is the case, we also need to change the Select tree.
+    if (sym.isStaticModule && !sym.isTopLevel) {
+      // todo
+      tree
+    } else tree
   }
+
+
 
   // todo
   def transform(ref: SingleDenotation)(implicit ctx: Context) = ref
 
-        /*
-         * This is stuff copied from 2.x
-         *
-          def apply(tp: Type): Type = tp match {
+  class TypeFlattener(implicit ctx: Context) extends TypeMap {
+    def apply(tp: Type): Type = tp match {
       case TypeRef(pre, sym, args) if isFlattenablePrefix(pre) =>
         assert(args.isEmpty && sym.enclosingTopLevelClass != NoSymbol, sym.ownerChain)
         typeRef(sym.enclosingTopLevelClass.owner.thisType, sym, Nil)
@@ -137,6 +162,7 @@ class Flatten extends TreeTransform with DenotTransformer {
         if (restp1 eq restp) tp else PolyType(tparams, restp1)
       case _ =>
         mapOver(tp)
-    } */
+    }
+  }
 
 }
