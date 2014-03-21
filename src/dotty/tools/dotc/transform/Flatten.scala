@@ -114,10 +114,10 @@ class Flatten extends TreeTransform with DenotTransformer {
 
   // todo
   def transform(ref: SingleDenotation)(implicit ctx: Context) = ref
-/*
+
   class TypeFlattener(implicit ctx: Context) extends TypeMap {
     def apply(tp: Type): Type = tp match {
-      case TypeRef(pre, sym, args) if isFlattenablePrefix(pre) =>
+      case TypeRef(prefix, name) if isFlattenablePrefix(pre) =>
         assert(args.isEmpty && sym.enclosingTopLevelClass != NoSymbol, sym.ownerChain)
         typeRef(sym.enclosingTopLevelClass.owner.thisType, sym, Nil)
       case ClassInfoType(parents, decls, clazz) =>
@@ -153,6 +153,8 @@ class Flatten extends TreeTransform with DenotTransformer {
       case _ =>
         mapOver(tp)
     }
-  }*/
+  }
+
+
 
 }
