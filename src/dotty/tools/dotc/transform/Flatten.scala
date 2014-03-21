@@ -8,6 +8,7 @@ import core.DenotTransformers._
 import core.Denotations._
 import core.Contexts._
 import core.Types._
+import core.Symbols._
 import ast.tpd._
 
 class Flatten extends TreeTransform with DenotTransformer {
@@ -25,17 +26,77 @@ class Flatten extends TreeTransform with DenotTransformer {
   private val liftedDefs =
     mutable.Map.empty[Symbol, mutable.ListBuffer[Tree]]
 
-  override def prepareForPackageDef(tree: PackageDef) = {
+  override def prepareForPackageDef(tree: PackageDef)(implicit ctx: Context) = {
     // Create buffer for nested defs
     val buf = new mutable.ListBuffer[Tree]
     liftedDefs(tree.symbol.moduleClass) = buf
-
-          // Transform definitions. Nested classes will get lifted into buf
-          val stats1 = transformStats(stats0)
+    this
   }
 
-  override def transformPackageDef()
+  override def transformPackageDef(tree: PackageDef)(
+    implicit ctx: Context, info: TransformerInfo) = {
 
+    // todo: am I responsible for this??
+    //val stats1 = transformStats(tree.stats0)
+
+    // By this point, nested classses are lifted in the corresponding
+    // buffer, but we still have to transform these trees. This can
+    // result in other lifted classes. We therefore iterate until we
+    // find a fixpoint.
+    val globBuf = liftedDefs(tree.symbol.moduleClass)
+    val locBuf  = new mutable.ListBuffer[Tree]
+    
+    while (globBuf.nonEmpty) {
+      val curElems = globBuf.toList
+      globBuf.clear()
+      locBuf ++= transformStats(curElems)
+    }
+
+    // todo: do I need to transform pid here?
+    cpy.PackageDef(tree, tree.pid, tree.stats ++ locBuf)
+  }
+
+  override def transformTypeDef(tree: TypeDef)(
+    implicit ctx: Context, info: TransformerInfo) = {
+
+    val sym = tree.symbol
+
+    if (sym.isNestedClass) {
+      // Buffer for these trees
+      val liftedBuffer = liftedDefs(sym.enclosingPackage)
+
+      // Append the tree to the buffer, but don't transform it. We
+      // want it to appear in the proper position for later
+      // transforms. This also ensures that the following
+      //
+      //   `object O { trait A { trait B } }`
+      //
+      // will be correctly ordered (lifted `B` should appear after
+      // lifted `A`). 
+      liftedBuffer.append(tree)
+
+      EmptyTree
+    } else tree
+  }
+
+  // todo: Scalac 2.x contains another match here:
+  //
+  // case Template(...) if tree.symbol.isDefinedInPackage
+  //  liftedDefs(tree.symbol.owner) = new ListBuffer
+  //
+  // is this required? why?
+
+
+  override def transformSelect(tree: Select)(
+    implicit ctx: Context, info: TransformerInfo) = {
+
+    // todo
+    // case Select(qual, name) if sym.isStatic && sym.is(Flags.Module) && !sym.isTopLevel =>
+    tree
+  }
+
+  // todo
+  def transform(ref: SingleDenotation)(implicit ctx: Context) = ref
 
         /*
          * This is stuff copied from 2.x
@@ -77,62 +138,5 @@ class Flatten extends TreeTransform with DenotTransformer {
       case _ =>
         mapOver(tp)
     } */
-
-
-  /** TreeFlattener moves nested class definitions to the package level */
-  class TreeFlattener extends tpd.TreeTransformer {
-
-
-
-    override def transform(tree: tpd.Tree)(implicit ctx: Context) =
-      postTransform(preTransform(tree))
-
-    private def preTransform(tree: tpd.Tree)(implicit ctx: Context) = {
-      tree match {
-        case PackageDef(pid, stats0) =>
-
-
-          cpy.PackageDef(tree, transformSub(pid), stats1 ++ buf)
-        case TypeDef(_, name, _) if tree.symbol.isNestedClass =>
-          val sym = tree.symbol
-
-          // todo: this insertion scheme (from Scalac 2.x) preserves ordering
-          // in cases like:
-          //
-          //   `object O { trait A { trait B } }`
-          //
-          // where `B` should appear after `A` to allow Mixin to handle
-          // accessors for private[this] trait fields. Is this still required
-          // if Mixin is moved before erasure?
-
-          val liftedBuffer = liftedDefs(sym.enclosingPackage)
-          val index = liftedBuffer.length
-
-          liftedBuffer.insert(index, super.transform(tree))
-
-          tpd.EmptyTree
-
-        // todo: Scalac 2.x contains another match here:
-        //
-        // case Template(...) if tree.symbol.isDefinedInPackage
-        //  liftedDefs(tree.symbol.owner) = new ListBuffer
-        //
-        // is this required? why?
-        case _ => super.transform(tree)
-      }
-    }
-
-    private def postTransform(tree: tpd.Tree)(implicit ctx: Context) = {
-      lazy val sym = tree.symbol
-      tree match {
-        case Select(qual, name) if sym.isStatic && sym.is(Flags.Module) && !sym.isTopLevel =>
-        case _ =>
-      }
-      tree
-    }
-
-  }
-
-
 
 }
