@@ -117,10 +117,8 @@ class Flatten extends TreeTransform with DenotTransformer {
 
 
   // todo
-  def transform(ref: SingleDenotation)(implicit ctx: Context) = ctx.atPhase(this.id) { ctx0 =>
-    debug.println(s"flattening: $ref")
-
-    implicit val ctx: Context = ctx0
+  def transform(ref: SingleDenotation)(implicit ctx: Context) = {
+    debug.println(s"flattening: ${ref.show}")
 
     val flatten = new TypeFlattener
     val info1 = flatten(ref.info)
@@ -147,7 +145,9 @@ class Flatten extends TreeTransform with DenotTransformer {
         // parameters so the lifted type doesn't reference them. But we are post
         // erasure so there should be no parameter types anymore
         // 2.x also doesn't handle type members
-        TypeRef(tp.symbol.enclosingPackage.thisType, tp.name)
+
+        //TypeRef(tp.symbol.enclosingPackage.thisType, tp.name)
+        TypeRef(tp.symbol.owner.thisType, tp.name)
       case ClassInfo(prefix, cls, classParents, decls, selfInfo) =>
         debug.println(s"ClassInfo $tp")
 
@@ -158,9 +158,7 @@ class Flatten extends TreeTransform with DenotTransformer {
         val decls1 = scopeTransform(cls) {
           val sc = newScope
           if (cls is PackageClass) {
-            ctx.atNextPhase { ctx =>
-              decls foreach { sc.enter(_)(ctx) }
-            }
+            decls foreach { sc.enter(_) }
           } else {
             // todo: 2.x forces the info of the old owner here:
             //
@@ -171,8 +169,9 @@ class Flatten extends TreeTransform with DenotTransformer {
 
             for (sym <- decls) {
               if (sym.isTerm && !sym.isStaticModule || sym.isClass) {
-                ctx.atNextPhase { ctx => sc.enter(sym)(ctx) }
+                sc.enter(sym)(ctx)
               } else {
+                // TODO how to add to parent?
                 debug.println(s"Other sym in class: $sym")
               }
             }
@@ -184,6 +183,7 @@ class Flatten extends TreeTransform with DenotTransformer {
 
         ClassInfo(prefix, cls, classParents, decls1, selfInfo)
       case _ =>
+        println(s"Other: $tp")
         mapOver(tp)
     }
   }
