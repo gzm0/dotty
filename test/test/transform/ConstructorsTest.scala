@@ -7,11 +7,11 @@ import org.junit.Assert
 class ConstructorsTest extends DottyTest {
 
   @Test
-  def printTest = checkCompile("constructors",
+  def printTest = checkCompile("intercepted",
       """
-      class A(x: Int) {
+      class A {
 
-        def this() = this(4)
+        //def this() = this(4)
 
       }
       """
@@ -19,7 +19,7 @@ class ConstructorsTest extends DottyTest {
 
     implicit val ctx = context
 
-    println(tree.show)
+    //println(tree.toString)
 
   }
 
